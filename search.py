@@ -19,30 +19,13 @@ STOP_FILE = BASE_DIR / "STOP"
 FOUND_FILE = BASE_DIR / "found.jsonl"
 PROGRESS_FILE = BASE_DIR / "progress.json"
 
-# Simple fixed CPU presets (also set via env CPU=16)
-ALLOWED_CPUS = (4, 8, 16, 32, 64)
-
 HEARTBEAT_EVERY = 3000
 SS58_FORMAT = 42  # Bittensor
 
 
-def default_cpu() -> int:
-    """Largest allowed preset that fits this machine."""
-    available = os.cpu_count() or 4
-    fits = [c for c in ALLOWED_CPUS if c <= available]
-    return fits[-1] if fits else ALLOWED_CPUS[0]
-
-
-def resolve_cpu(value: int | str | None) -> int:
-    if value is None or value == "":
-        raw = os.environ.get("CPU") or os.environ.get("WORKERS")
-        if raw is None or raw == "":
-            return default_cpu()
-        value = raw
-    n = int(value)
-    if n not in ALLOWED_CPUS:
-        raise SystemExit(f"CPU must be one of {list(ALLOWED_CPUS)}, got {n}")
-    return n
+def detect_cpu() -> int:
+    """Auto-detect worker count from available CPU cores."""
+    return os.cpu_count() or 4
 
 
 def normalize_target(prefix: str, suffix: str, case_insensitive: bool) -> tuple[str, str]:
@@ -212,10 +195,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--cpu",
         type=int,
-        choices=ALLOWED_CPUS,
         default=None,
-        help=f"Worker count. One of {list(ALLOWED_CPUS)}. "
-        f"Env: CPU=16. Default: largest preset ≤ machine cores ({default_cpu()} here).",
+        help="Worker count. Default: auto-detected CPU cores "
+        f"({detect_cpu()} on this machine).",
     )
     parser.add_argument(
         "--prefix",
@@ -238,7 +220,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    cpu = resolve_cpu(args.cpu)
+    cpu = args.cpu if args.cpu and args.cpu > 0 else detect_cpu()
     case_insensitive = not args.case_sensitive
     prefix, suffix = normalize_target(args.prefix, args.suffix, case_insensitive)
     max_score = len(prefix) + len(suffix)

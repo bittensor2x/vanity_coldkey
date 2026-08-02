@@ -24,31 +24,22 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-## CPU setting (simple)
+## CPU usage
 
-Worker count must be one of:
+Worker count is **auto-detected from the machine's CPU cores** — no setting needed. It spawns one worker process per core.
 
-```text
-4 | 8 | 16 | 32 | 64
+If you ever want to override it (e.g. leave a core free for other work), pass `--cpu N`:
+
+```bash
+python search.py --cpu 8
 ```
-
-Set it in any of these ways (first wins for CLI):
-
-| Method | Example |
-|--------|---------|
-| CLI | `python search.py --cpu 16` |
-| Env | `CPU=32 python search.py` |
-| PM2 | edit `CPU` in `ecosystem.config.js` |
-
-If unset, the script picks the **largest preset ≤ machine core count**.
 
 ## Run with PM2 (recommended)
 
-Edit `ecosystem.config.js` and set `CPU` (and optional `PREFIX` / `SUFFIX`):
+`ecosystem.config.js` only needs `PREFIX` / `SUFFIX` (CPU is automatic):
 
 ```js
 env: {
-  CPU: "16",       // 4 | 8 | 16 | 32 | 64
   PREFIX: "Ev3R",
   SUFFIX: "rDEND",
 }
@@ -67,15 +58,9 @@ pm2 save                    # persist process list
 pm2 startup                 # optional: start on reboot
 ```
 
-PM2 runs **one** Python process; that process spawns the `CPU` workers itself (do not set PM2 `instances` > 1).
+PM2 runs **one** Python process; that process auto-spawns one worker per CPU core (do not set PM2 `instances` > 1).
 
 On a match (or clean stop), the process exits with code `0` and PM2 **does not** autorestart (`stop_exit_codes: [0]`). Crashes still restart.
-
-Change CPU: edit `CPU` in `ecosystem.config.js`, then:
-
-```bash
-pm2 restart vanity-coldkey --update-env
-```
 
 To search again after a hit:
 
@@ -87,15 +72,11 @@ pm2 restart vanity-coldkey
 ## Run without PM2
 
 ```bash
-# Default CPU preset for this machine
+# Auto-detected CPU cores
 python search.py
 
-# Explicit CPU
-python search.py --cpu 8
-CPU=32 python search.py
-
-# Custom pattern
-python search.py --cpu 16 --prefix Ev3R --suffix rDEND
+# Custom pattern / explicit worker count
+python search.py --prefix Ev3R --suffix rDEND --cpu 8
 ```
 
 Stop:
@@ -132,7 +113,7 @@ btcli wallet regen_coldkey --seed <seed_hex>
 
 **Security:** `found.jsonl` contains private key material. It is gitignored — never commit or publish it.
 
-`.env.example` documents the same knobs as `ecosystem.config.js` / CLI. Copy values into the PM2 `env` block (or export them); the app does not auto-load a `.env` file.
+`.env.example` documents the same knobs as `ecosystem.config.js` / CLI (`PREFIX`, `SUFFIX`, optional `CASE_SENSITIVE`, `CPU`). Copy values into the PM2 `env` block (or export them); the app does not auto-load a `.env` file.
 
 ## Progress files (local only)
 
