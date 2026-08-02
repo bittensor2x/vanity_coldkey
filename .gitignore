@@ -1,0 +1,22 @@
+# Virtualenv / local env
+.venv/
+venv/
+env/
+.env
+
+# Runtime / secrets — never commit these
+found.jsonl
+STOP
+progress.json
+search.log
+*.log
+stats/
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
