@@ -23,8 +23,52 @@ HEARTBEAT_EVERY = 3000
 SS58_FORMAT = 42  # Bittensor
 
 
+def cpu_diagnostics() -> dict:
+    """Report every CPU-count signal we can find, to explain scaling surprises.
+
+    - os_cpu_count: total logical CPUs the OS reports (ignores cgroup quotas).
+    - affinity_count: CPUs this process is actually allowed to run on
+      (respects `--cpuset-cpus` / `taskset`, but NOT `--cpus=N` quotas).
+    - cgroup_quota_cpus: effective CPU budget from a cgroup v1/v2 CFS quota
+      (e.g. Docker `--cpus=16`, Kubernetes `resources.limits.cpu`), which
+      silently throttles far below `os_cpu_count` without changing affinity.
+    """
+    info: dict = {"os_cpu_count": os.cpu_count()}
+
+    try:
+        info["affinity_count"] = len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
+    except AttributeError:
+        info["affinity_count"] = None
+
+    info["cgroup_quota_cpus"] = None
+    try:
+        quota_raw, period_raw = Path("/sys/fs/cgroup/cpu.max").read_text().split()
+        if quota_raw != "max":
+            info["cgroup_quota_cpus"] = round(int(quota_raw) / int(period_raw), 2)
+    except (OSError, ValueError):
+        try:
+            quota = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_quota_us").read_text())
+            period = int(Path("/sys/fs/cgroup/cpu/cpu.cfs_period_us").read_text())
+            if quota > 0:
+                info["cgroup_quota_cpus"] = round(quota / period, 2)
+        except (OSError, ValueError):
+            pass
+
+    return info
+
+
 def detect_cpu() -> int:
-    """Auto-detect worker count from available CPU cores."""
+    """Auto-detect worker count from CPUs actually available to this process.
+
+    Prefers the sched affinity mask (correct under `--cpuset-cpus`/`taskset`)
+    over the raw OS core count (which ignores such restrictions).
+    """
+    try:
+        affinity = len(os.sched_getaffinity(0))  # type: ignore[attr-defined]
+        if affinity > 0:
+            return affinity
+    except AttributeError:
+        pass
     return os.cpu_count() or 4
 
 
@@ -240,12 +284,29 @@ def main() -> None:
 
     display_prefix = f"5{args.prefix[1:] if args.prefix.startswith('5') else args.prefix}"
     mode = "case-sensitive" if args.case_sensitive else "case-insensitive"
+    diag = cpu_diagnostics()
     print(
         f"Starting vanity search with CPU={cpu}. "
         f"Target: {display_prefix}...{args.suffix} ({mode}). "
         f"Match file: {FOUND_FILE}",
         flush=True,
     )
+    print(
+        f"CPU diagnostics: os_cpu_count={diag['os_cpu_count']} "
+        f"affinity_count={diag['affinity_count']} "
+        f"cgroup_quota_cpus={diag['cgroup_quota_cpus']}",
+        flush=True,
+    )
+    quota = diag["cgroup_quota_cpus"]
+    if quota is not None and quota < cpu:
+        print(
+            f"WARNING: this process is CPU-throttled to ~{quota} cores by a "
+            f"cgroup quota (Docker --cpus, Kubernetes cpu limit, etc.), but "
+            f"{cpu} workers were started. Extra workers beyond ~{quota:.0f} "
+            f"will just add contention, not throughput. Set --cpu to match "
+            f"the quota for best results.",
+            flush=True,
+        )
 
     def request_stop(signum, _frame) -> None:
         print(f"Signal {signum} — writing STOP.", flush=True)
