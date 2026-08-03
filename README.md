@@ -113,7 +113,35 @@ btcli wallet regen_coldkey --seed <seed_hex>
 
 **Security:** `found.jsonl` contains private key material. It is gitignored — never commit or publish it.
 
-`.env.example` documents the same knobs as `ecosystem.config.js` / CLI (`PREFIX`, `SUFFIX`, optional `CASE_SENSITIVE`, `CPU`). Copy values into the PM2 `env` block (or export them); the app does not auto-load a `.env` file.
+## Telegram notification on match
+
+Get a match alert the moment `search.py` finds one:
+
+1. Create a bot with [@BotFather](https://t.me/BotFather) and copy its token.
+2. Add the bot to your channel/group as an **admin** (needed to post).
+3. Get the chat id — for a channel it looks like `-100xxxxxxxxxx` (e.g. via [@userinfobot](https://t.me/userinfobot) or the `getUpdates` API).
+4. Copy `.env.example` to `.env` and fill in the values:
+
+```bash
+cp .env.example .env
+```
+
+```env
+TELEGRAM_BOT_TOKEN=123456:ABC-your-token
+TELEGRAM_CHAT_ID=-1001234567890
+```
+
+`search.py` auto-loads `.env` from this directory at startup (existing environment variables always win, so PM2/shell env can still override it). No PM2 config changes needed — and no secrets end up in the git-tracked `ecosystem.config.js`.
+
+Test your credentials any time:
+
+```bash
+.venv/bin/python notify.py "test message"
+```
+
+On a match, you'll get a message with the address and pattern. **The seed hex is *not* included by default** — Telegram isn't a secure place to store a private key. It stays in `found.jsonl` on the host. Set `TELEGRAM_INCLUDE_SEED=1` in `.env` to include it anyway (not recommended).
+
+If Telegram isn't configured, the search still works exactly the same — it just skips the notification and logs that it did.
 
 ## Progress files (local only)
 
@@ -136,8 +164,11 @@ vanity_coldkey/
 ├── README.md
 ├── requirements.txt
 ├── search.py              # main miner
+├── notify.py              # Telegram notifier (stdlib only)
+├── diagnose_scaling.py    # CPU scaling diagnostic tool
 ├── ecosystem.config.js    # PM2
 ├── .env.example
+├── .env                   # your real secrets (gitignored, not committed)
 ├── .gitignore
 └── .venv/                 # local virtualenv (not committed)
 ```

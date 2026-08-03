@@ -13,14 +13,69 @@ from pathlib import Path
 
 from substrateinterface import Keypair, KeypairType
 
+import notify
+
 BASE_DIR = Path(__file__).resolve().parent
 STATS_DIR = BASE_DIR / "stats"
 STOP_FILE = BASE_DIR / "STOP"
 FOUND_FILE = BASE_DIR / "found.jsonl"
 PROGRESS_FILE = BASE_DIR / "progress.json"
+ENV_FILE = BASE_DIR / ".env"
 
 HEARTBEAT_EVERY = 3000
 SS58_FORMAT = 42  # Bittensor
+
+
+def load_dotenv(path: Path) -> None:
+    """Tiny .env loader (stdlib only). Existing env vars always win, so PM2's
+    `env` block or the shell can still override anything in the file."""
+    if not path.exists():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key:
+            os.environ.setdefault(key, value)
+
+
+def notify_found(found_jsonl_text: str) -> None:
+    """Send a Telegram alert for the last match in found.jsonl, if configured."""
+    if not notify.is_configured():
+        print(
+            "Telegram not configured (set TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID "
+            "in .env) — skipping notification.",
+            flush=True,
+        )
+        return
+
+    lines = [ln for ln in found_jsonl_text.splitlines() if ln.strip()]
+    if not lines:
+        return
+    try:
+        data = json.loads(lines[-1])
+    except json.JSONDecodeError:
+        return
+
+    include_seed = os.environ.get("TELEGRAM_INCLUDE_SEED", "").lower() in ("1", "true", "yes")
+    text_lines = [
+        "🎉 <b>Bittensor vanity coldkey FOUND</b>",
+        f"Address: <code>{data.get('address', '?')}</code>",
+        f"Pattern: 5{data.get('prefix', '?')}...{data.get('suffix', '?')}",
+    ]
+    if include_seed:
+        text_lines.append(f"Seed (hex): <code>{data.get('seed_hex', '?')}</code>")
+    else:
+        text_lines.append(
+            "Seed hex is saved locally in <code>found.jsonl</code> on the host "
+            "(not included here — set TELEGRAM_INCLUDE_SEED=1 to include it, "
+            "not recommended)."
+        )
+    ok = notify.send_telegram_message("\n".join(text_lines))
+    print(f"Telegram notification {'sent' if ok else 'FAILED'}.", flush=True)
 
 
 def cpu_diagnostics() -> dict:
@@ -225,7 +280,9 @@ def monitor(n_workers: int, start_time: float, max_score: int) -> None:
 
         if FOUND_FILE.exists():
             print("FOUND: match written to found.jsonl", flush=True)
-            print(FOUND_FILE.read_text(encoding="utf-8"), flush=True)
+            found_text = FOUND_FILE.read_text(encoding="utf-8")
+            print(found_text, flush=True)
+            notify_found(found_text)
             return
         if STOP_FILE.exists():
             print("STOPPED (STOP file present).", flush=True)
@@ -263,6 +320,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    load_dotenv(ENV_FILE)
     args = parse_args()
     cpu = args.cpu if args.cpu and args.cpu > 0 else detect_cpu()
     case_insensitive = not args.case_sensitive
